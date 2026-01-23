@@ -2,7 +2,7 @@ name: Bitcoin Paper Trading Bot
 
 on:
   schedule:
-    - cron: "*/5 * * * *"   # Every 5 minutes
+    - cron: "0 * * * *"   # Every 5 minutes
   push:
     branches:
       - main                # Run on commits to main
