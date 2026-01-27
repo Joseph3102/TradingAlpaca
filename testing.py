@@ -6,7 +6,10 @@ from pathlib import Path
 import os
 
 # Load .env
-load_dotenv(Path(__file__).parent / ".env")
+# Load .env only if running locally
+if Path(".env").exists():
+    load_dotenv()
+
 
 # Connect to Alpaca paper trading
 trading_client = TradingClient(
