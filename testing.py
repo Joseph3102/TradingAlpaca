@@ -13,8 +13,8 @@ if Path(".env").exists():
 
 # Connect to Alpaca paper trading
 trading_client = TradingClient(
-    api_key=os.environ["APCA_API_KEY_ID"],
-    secret_key=os.environ["APCA_API_SECRET_KEY"],
+    api_key=os.environ["API_KEY"],
+    secret_key=os.environ["API_SECRET_KEY"],
     paper=True
 )
 
