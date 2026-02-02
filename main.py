@@ -1,42 +1,90 @@
 import os
+from datetime import datetime, timedelta, timezone
+from pathlib import Path
 import numpy as np
 import pandas as pd
-from pathlib import Path
-from datetime import datetime, timedelta, timezone
 
 from alpaca.trading.client import TradingClient
 from alpaca.trading.enums import OrderSide, TimeInForce, AssetClass
 from alpaca.trading.requests import MarketOrderRequest
+
 from alpaca.data.historical import StockHistoricalDataClient
 from alpaca.data.requests import StockBarsRequest
 from alpaca.data.timeframe import TimeFrame
+
 from dotenv import load_dotenv
 
-# Load .env locally only
+
+# ───────────────────────────────────────────────
+# LOAD .env (local only — GitHub Actions uses Secrets)
+# ───────────────────────────────────────────────
 if Path(".env").exists():
     load_dotenv()
 
-# Alpaca clients
-trading = TradingClient(
-    api_key=os.environ["API_KEY"],
-    secret_key=os.environ["API_KEY_SECRET"],
-    paper=True,
-)
+# CORRECT Alpaca environment variables
+API_KEY = os.environ["API_KEY"]
+API_SECRET = os.environ["API_KEY_SECRET"]
 
-data_client = StockHistoricalDataClient(
-    api_key=os.environ["API_KEY"],
-    secret_key=os.environ["API_KEY_SECRET"],
-)
 
-# -----------------------------
-# Stock list (you should expand)
-# -----------------------------
-rus2000 = ["NVDA", "AAPL", "MSFT", "MA", "AMZN", "GOOGL", "META"]
+# ───────────────────────────────────────────────
+# ALPACA CLIENTS
+# ───────────────────────────────────────────────
+trading_client = TradingClient(API_KEY, API_SECRET, paper=True)
 
-# -----------------------------
-# === Helper: Fetch indicators ===
-# -----------------------------
+# SDK VERSION: feed MUST be set on the request, not here
+data_client = StockHistoricalDataClient(API_KEY, API_SECRET)
+
+
+# ============================================================
+# INDICATOR CALCULATIONS
+# ============================================================
+
+def calculate_rsi(prices, period=14):
+    delta = prices.diff()
+    gain = delta.clip(lower=0)
+    loss = -delta.clip(upper=0)
+
+    avg_gain = gain.rolling(period).mean()
+    avg_loss = loss.rolling(period).mean()
+
+    rs = avg_gain / avg_loss
+    return 100 - (100 / (1 + rs))
+
+
+def calculate_adx(df, period=14):
+    df = df.copy()
+    df["H-L"] = df["high"] - df["low"]
+    df["H-PC"] = abs(df["high"] - df["close"].shift(1))
+    df["L-PC"] = abs(df["low"] - df["close"].shift(1))
+    df["TR"] = df[["H-L", "H-PC", "L-PC"]].max(axis=1)
+
+    df["+DM"] = np.where(
+        (df["high"] - df["high"].shift(1)) > (df["low"].shift(1) - df["low"]),
+        df["high"] - df["high"].shift(1),
+        0
+    )
+    df["-DM"] = np.where(
+        (df["low"].shift(1) - df["low"]) > (df["high"] - df["high"].shift(1)),
+        df["low"].shift(1) - df["low"],
+        0
+    )
+
+    tr_smooth = df["TR"].rolling(period).sum()
+    plus_dm_smooth = df["+DM"].rolling(period).sum()
+    minus_dm_smooth = df["-DM"].rolling(period).sum()
+
+    plus_di = 100 * (plus_dm_smooth / tr_smooth)
+    minus_di = 100 * (minus_dm_smooth / tr_smooth)
+
+    dx = 100 * abs(plus_di - minus_di) / (plus_di + minus_di)
+    adx = dx.rolling(period).mean()
+    return adx
+
+
 def get_indicators(symbol):
+    """
+    Fetches stock history using FREE IEX feed.
+    """
     end = datetime.now(timezone.utc)
     start = end - timedelta(days=14)
 
@@ -45,122 +93,153 @@ def get_indicators(symbol):
         timeframe=TimeFrame.Hour,
         start=start,
         end=end,
+        feed="iex"   # CORRECT place for feed
     )
 
-    bars = data_client.get_stock_bars(request).df
-    if bars.empty:
+    try:
+        bars = data_client.get_stock_bars(request).df
+    except Exception as e:
+        print(f"[ERROR] Couldn't fetch data for {symbol}: {e}")
         return None
 
-    df = bars.xs(symbol)
+    if bars.empty:
+        print(f"[NO DATA] {symbol}")
+        return None
 
-    # Closing prices
-    close = df["close"]
+    prices = bars["close"]
 
-    # 1. Standard deviation volatility
-    std_dev = close.pct_change().std() * 100  # %
-
-    # 2. RSI calculation
-    delta = close.diff()
-    gain = delta.clip(lower=0)
-    loss = -delta.clip(upper=0)
-    avg_gain = gain.rolling(14).mean()
-    avg_loss = loss.rolling(14).mean()
-    rs = avg_gain / avg_loss
-    rsi = 100 - (100 / (1 + rs))
-    rsi_value = float(rsi.iloc[-1])
-
-    # 3. ADX calculation (simplified & standard)
-    df["tr"] = np.maximum.reduce([
-        df["high"] - df["low"],
-        (df["high"] - df["close"].shift()).abs(),
-        (df["low"] - df["close"].shift()).abs()
-    ])
-
-    df["+dm"] = np.where((df["high"] - df["high"].shift()) > (df["low"].shift() - df["low"]), 
-                         np.maximum(df["high"] - df["high"].shift(), 0), 
-                         0)
-
-    df["-dm"] = np.where((df["low"].shift() - df["low"]) > (df["high"] - df["high"].shift()), 
-                         np.maximum(df["low"].shift() - df["low"], 0), 
-                         0)
-
-    df["+di"] = 100 * (df["+dm"].ewm(alpha=1/14).mean() / df["tr"].ewm(alpha=1/14).mean())
-    df["-di"] = 100 * (df["-dm"].ewm(alpha=1/14).mean() / df["tr"].ewm(alpha=1/14).mean())
-    df["dx"] = 100 * (abs(df["+di"] - df["-di"]) / (df["+di"] + df["-di"]))
-    adx = df["dx"].rolling(14).mean().iloc[-1]
+    rsi = calculate_rsi(prices).iloc[-1]
+    adx = calculate_adx(bars).iloc[-1]
+    volatility = prices.pct_change().std() * 100
 
     return {
-        "std": std_dev,
-        "rsi": rsi_value,
+        "rsi": float(rsi),
         "adx": float(adx),
-        "current_price": float(close.iloc[-1])
+        "volatility": float(volatility),
+        "price": float(prices.iloc[-1])
     }
 
-# -----------------------------
-# === Buy Logic ===
-# -----------------------------
-def buy_stock(symbol):
-    print(f"BUYING {symbol}")
+
+# ============================================================
+# BST FOR VOLATILITY SORTING
+# ============================================================
+
+class Node:
+    def __init__(self, volatility, symbol):
+        self.volatility = volatility
+        self.symbol = symbol
+        self.left = None
+        self.right = None
+
+
+class VolatilityBST:
+    def __init__(self):
+        self.root = None
+
+    def insert(self, vol, sym):
+        def _insert(node, vol, sym):
+            if node is None:
+                return Node(vol, sym)
+            if vol > node.volatility:  # highest vol gets priority
+                node.left = _insert(node.left, vol, sym)
+            else:
+                node.right = _insert(node.right, vol, sym)
+            return node
+
+        self.root = _insert(self.root, vol, sym)
+
+    def in_order(self):
+        result = []
+        def _traverse(node):
+            if node is None:
+                return
+            _traverse(node.left)
+            result.append(node.symbol)
+            _traverse(node.right)
+        _traverse(self.root)
+        return result
+
+
+# ============================================================
+# TRADING HELPERS
+# ============================================================
+
+positions = {}   # symbol → buy price
+
+
+def buy_stock(symbol, price):
+    print(f"[BUY] {symbol} @ {price}")
 
     order = MarketOrderRequest(
         symbol=symbol,
-        notional=50,  # Buy $50 worth
+        notional=50,
         side=OrderSide.BUY,
-        time_in_force=TimeInForce.GTC,
+        time_in_force=TimeInForce.DAY,
         asset_class=AssetClass.US_EQUITY
     )
-    trading.submit_order(order)
+
+    try:
+        trading_client.submit_order(order)
+        positions[symbol] = price
+    except Exception as e:
+        print(f"[BUY FAILED] {symbol}: {e}")
 
 
-# -----------------------------
-# === Sell Logic ===
-# -----------------------------
-def sell_stock(symbol, qty):
-    print(f"SELLING {symbol}")
+def sell_stock(symbol):
+    print(f"[SELL] {symbol}")
 
     order = MarketOrderRequest(
         symbol=symbol,
-        qty=qty,
+        qty=1,
         side=OrderSide.SELL,
-        time_in_force=TimeInForce.GTC,
+        time_in_force=TimeInForce.DAY,
         asset_class=AssetClass.US_EQUITY
     )
-    trading.submit_order(order)
+
+    try:
+        trading_client.submit_order(order)
+        positions.pop(symbol, None)
+    except Exception as e:
+        print(f"[SELL FAILED] {symbol}: {e}")
 
 
-# =========================================================
-# ===================== MAIN LOGIC ========================
-# =========================================================
+# ============================================================
+# MAIN BOT LOGIC
+# ============================================================
 
-# A) Check buy conditions for all stocks in list
-for symbol in rus2000:
-    ind = get_indicators(symbol)
-    if ind is None:
+RUSSELL_2000 = ["AAPL", "MSFT", "NVDA", "AMZN", "META"]
+
+bst = VolatilityBST()
+stock_info = {}
+
+print("Fetching indicators...")
+
+# 1. Fetch indicators and build BST
+for stock in RUSSELL_2000:
+    ind = get_indicators(stock)
+    if ind:
+        print(f"{stock} → {ind}")
+        stock_info[stock] = ind
+        bst.insert(ind["volatility"], stock)
+
+# 2. Buy logic (high → low volatility)
+for stock in bst.in_order():
+    ind = stock_info[stock]
+
+    if ind["volatility"] > 35 and ind["adx"] < 25 and ind["rsi"] < 30:
+        if stock not in positions:
+            buy_stock(stock, ind["price"])
+
+# 3. Sell logic
+for stock in list(positions.keys()):
+    ind = get_indicators(stock)
+    if not ind:
         continue
 
-    print(symbol, ind)
+    buy_price = positions[stock]
+    current = ind["price"]
 
-    if (
-        ind["std"] > 35           # high volatility
-        and ind["adx"] < 25       # weak trend
-        and ind["rsi"] < 30       # oversold
-    ):
-        buy_stock(symbol)
+    if current <= buy_price * 0.95 or current >= buy_price * 1.10:
+        sell_stock(stock)
 
-# B) Loop through currently held positions
-positions = trading.get_all_positions()
-
-for pos in positions:
-    symbol = pos.symbol
-    qty = pos.qty
-    avg = float(pos.avg_entry_price)
-
-    ind = get_indicators(symbol)
-    if ind is None:
-        continue
-
-    price = ind["current_price"]
-
-    # Take profit +10% or stop loss -5%
-    if price < avg * 0.95 or price > avg * 1.10:
-        sell_stock(symbol, qty)
+print("Bot run complete.")
