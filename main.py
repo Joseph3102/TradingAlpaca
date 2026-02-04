@@ -93,7 +93,7 @@ def get_indicators(symbol):
         timeframe=TimeFrame.Hour,
         start=start,
         end=end,
-        feed="iex"   # CORRECT place for feed
+        feed="iex"
     )
 
     try:
@@ -210,19 +210,21 @@ def sell_stock(symbol):
 RUSSELL_2000 = ["AAPL", "MSFT", "NVDA", "AMZN", "META"]
 
 bst = VolatilityBST()
-stock_info = {}
+
+# ✅ YOUR DICTIONARY (this is all you wanted added)
+stock_info = {}   # symbol → {rsi, adx, volatility, price}
 
 print("Fetching indicators...")
 
-# 1. Fetch indicators and build BST
+# 1. Fetch indicators + fill dictionary + build BST
 for stock in RUSSELL_2000:
     ind = get_indicators(stock)
     if ind:
         print(f"{stock} → {ind}")
-        stock_info[stock] = ind
+        stock_info[stock] = ind     # store indicators in dictionary
         bst.insert(ind["volatility"], stock)
 
-# 2. Buy logic (high → low volatility)
+# 2. Buy logic (sorted by volatility)
 for stock in bst.in_order():
     ind = stock_info[stock]
 
@@ -242,4 +244,7 @@ for stock in list(positions.keys()):
     if current <= buy_price * 0.95 or current >= buy_price * 1.10:
         sell_stock(stock)
 
+
+print("AAPL updated:", stock_info["AAPL"])
 print("Bot run complete.")
+
