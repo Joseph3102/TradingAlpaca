@@ -21,18 +21,12 @@ from dotenv import load_dotenv
 if Path(".env").exists():
     load_dotenv()
 
-# CORRECT Alpaca environment variables
 API_KEY = os.environ["API_KEY"]
 API_SECRET = os.environ["API_KEY_SECRET"]
 
-
-# ───────────────────────────────────────────────
-# ALPACA CLIENTS
-# ───────────────────────────────────────────────
 trading_client = TradingClient(API_KEY, API_SECRET, paper=True)
-
-# SDK VERSION: feed MUST be set on the request, not here
 data_client = StockHistoricalDataClient(API_KEY, API_SECRET)
+
 
 
 # ============================================================
@@ -82,9 +76,6 @@ def calculate_adx(df, period=14):
 
 
 def get_indicators(symbol):
-    """
-    Fetches stock history using FREE IEX feed.
-    """
     end = datetime.now(timezone.utc)
     start = end - timedelta(days=14)
 
@@ -120,6 +111,7 @@ def get_indicators(symbol):
     }
 
 
+
 # ============================================================
 # BST FOR VOLATILITY SORTING
 # ============================================================
@@ -140,7 +132,7 @@ class VolatilityBST:
         def _insert(node, vol, sym):
             if node is None:
                 return Node(vol, sym)
-            if vol > node.volatility:  # highest vol gets priority
+            if vol > node.volatility:
                 node.left = _insert(node.left, vol, sym)
             else:
                 node.right = _insert(node.right, vol, sym)
@@ -148,16 +140,24 @@ class VolatilityBST:
 
         self.root = _insert(self.root, vol, sym)
 
-    def in_order(self):
+    def get_priority_list(self):
         result = []
-        def _traverse(node):
-            if node is None:
-                return
-            _traverse(node.left)
-            result.append(node.symbol)
-            _traverse(node.right)
-        _traverse(self.root)
+        def _rev(node):
+            if node:
+                _rev(node.right)
+                result.append((node.symbol, node.volatility))
+                _rev(node.left)
+        _rev(self.root)
         return result
+
+    def print_priority_list(self):
+        items = self.get_priority_list()
+        print("\n📊 Volatility Priority (HIGH → LOW)")
+        print("-----------------------------------")
+        for sym, vol in items:
+            print(f"{sym}: {vol:.4f}")
+        print("-----------------------------------\n")
+
 
 
 # ============================================================
@@ -169,7 +169,6 @@ positions = {}   # symbol → buy price
 
 def buy_stock(symbol, price):
     print(f"[BUY] {symbol} @ {price}")
-
     order = MarketOrderRequest(
         symbol=symbol,
         notional=50,
@@ -177,7 +176,6 @@ def buy_stock(symbol, price):
         time_in_force=TimeInForce.DAY,
         asset_class=AssetClass.US_EQUITY
     )
-
     try:
         trading_client.submit_order(order)
         positions[symbol] = price
@@ -187,7 +185,6 @@ def buy_stock(symbol, price):
 
 def sell_stock(symbol):
     print(f"[SELL] {symbol}")
-
     order = MarketOrderRequest(
         symbol=symbol,
         qty=1,
@@ -195,12 +192,12 @@ def sell_stock(symbol):
         time_in_force=TimeInForce.DAY,
         asset_class=AssetClass.US_EQUITY
     )
-
     try:
         trading_client.submit_order(order)
         positions.pop(symbol, None)
     except Exception as e:
         print(f"[SELL FAILED] {symbol}: {e}")
+
 
 
 # ============================================================
@@ -210,29 +207,28 @@ def sell_stock(symbol):
 RUSSELL_2000 = ["AAPL", "MSFT", "NVDA", "AMZN", "META"]
 
 bst = VolatilityBST()
-
-# ✅ YOUR DICTIONARY (this is all you wanted added)
-stock_info = {}   # symbol → {rsi, adx, volatility, price}
+stock_info = {}   # your dictionary
 
 print("Fetching indicators...")
 
-# 1. Fetch indicators + fill dictionary + build BST
+# Fetch indicators + store + build BST
 for stock in RUSSELL_2000:
     ind = get_indicators(stock)
     if ind:
         print(f"{stock} → {ind}")
-        stock_info[stock] = ind     # store indicators in dictionary
+        stock_info[stock] = ind
         bst.insert(ind["volatility"], stock)
 
-# 2. Buy logic (sorted by volatility)
-for stock in bst.in_order():
-    ind = stock_info[stock]
+# BUY LOGIC
+for stock in bst.get_priority_list():
+    symbol = stock[0]
+    ind = stock_info[symbol]
 
     if ind["volatility"] > 35 and ind["adx"] < 25 and ind["rsi"] < 30:
-        if stock not in positions:
-            buy_stock(stock, ind["price"])
+        if symbol not in positions:
+            buy_stock(symbol, ind["price"])
 
-# 3. Sell logic
+# SELL LOGIC
 for stock in list(positions.keys()):
     ind = get_indicators(stock)
     if not ind:
@@ -244,7 +240,11 @@ for stock in list(positions.keys()):
     if current <= buy_price * 0.95 or current >= buy_price * 1.10:
         sell_stock(stock)
 
+# PRINT BST ORDER
+bst.print_priority_list()
 
-print("AAPL updated:", stock_info["AAPL"])
+# SAFELY PRINT AAPL'S STORED VALUES
+if "AAPL" in stock_info:
+    print("AAPL updated:", stock_info["AAPL"])
+
 print("Bot run complete.")
-

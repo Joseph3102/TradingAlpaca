@@ -1,3 +1,11 @@
+class BSTNode:
+    def __init__(self, volatility, symbol):
+        self.volatility = volatility
+        self.symbol = symbol
+        self.left = None
+        self.right = None
+
+
 class VolatilityBST:
     def __init__(self):
         self.root = None
@@ -20,8 +28,8 @@ class VolatilityBST:
             else:
                 self._insert(node.right, volatility, symbol)
 
-    # Get stocks from highest → lowest volatility
     def get_priority_list(self):
+        """Returns [(symbol, volatility), ...] high → low"""
         result = []
         self._reverse_inorder(self.root, result)
         return result
@@ -31,3 +39,15 @@ class VolatilityBST:
             self._reverse_inorder(node.right, result)
             result.append((node.symbol, node.volatility))
             self._reverse_inorder(node.left, result)
+
+    # ⭐ NEW: Pretty print volatility ordering
+    def print_priority_list(self):
+        priority = self.get_priority_list()
+
+        print("\n📊 Volatility Priority (High → Low)")
+        print("-----------------------------------")
+
+        for symbol, vol in priority:
+            print(f"{symbol}: {vol:.4f}")
+
+        print("-----------------------------------\n")
