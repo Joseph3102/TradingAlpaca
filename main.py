@@ -219,13 +219,31 @@ for stock in RUSSELL_2000:
         bst.insert(ind["volatility"], stock)
 
 # BUY LOGIC
-for stock in bst.get_priority_list():
-    symbol = stock[0]
-    ind = stock_info[symbol]
+# =======================================================
+# BUY ONLY THE HIGHEST PRIORITY STOCK
+# =======================================================
 
-    if ind["volatility"] > 35 and ind["adx"] < 25 and ind["rsi"] < 30:
-        if symbol not in positions:
-            buy_stock(symbol, ind["price"])
+priority = bst.get_priority_list()
+
+if priority:
+    top_symbol, top_vol = priority[0]
+    ind = stock_info[top_symbol]
+
+    print(f"\nTop Priority Stock: {top_symbol} (Vol={top_vol:.4f})")
+    print("Indicators:", ind)
+
+    if (
+        ind["volatility"] > 35 and
+        ind["adx"] < 25 and
+        ind["rsi"] < 30
+    ):
+        if top_symbol not in positions:
+            buy_stock(top_symbol, ind["price"])
+        else:
+            print(f"{top_symbol} already owned — no new buy.")
+    else:
+        print("⚠ No buy — conditions not met.")
+
 
 # SELL LOGIC
 for stock in list(positions.keys()):
