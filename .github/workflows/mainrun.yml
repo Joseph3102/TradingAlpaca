@@ -2,7 +2,7 @@ name: Run Trading Bot Every Hour
 
 on:
   schedule:
-    - cron: "0 * * * *"   # runs every hour
+    - cron: "0 * * * *"    # runs every hour
   workflow_dispatch:
 
 jobs:
@@ -20,13 +20,13 @@ jobs:
 
       - name: Install dependencies
         run: |
-          pip install -r requirements.txt
+          python -m pip install --upgrade pip
+          pip install alpaca-py
+          pip install python-dotenv
 
-      - name: Run bot
+      - name: Run trading bot
         env:
           API_KEY: ${{ secrets.ALPACA_API_KEY }}
           API_SECRET: ${{ secrets.ALPACA_API_SECRET }}
         run: |
-          export API_KEY=${API_KEY}
-          export API_SECRET=${API_SECRET}
           python main.py
