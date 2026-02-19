@@ -141,12 +141,12 @@ class VolatilityBST:
 
     def get_priority_list(self):
         result = []
-        def _rev(node):
+        def _traverse(node):
             if node:
-                _rev(node.right)
+                _traverse(node.left)   # Visit LEFT first (higher volatility)
                 result.append((node.symbol, node.volatility))
-                _rev(node.left)
-        _rev(self.root)
+                _traverse(node.right)  # Then RIGHT (lower volatility)
+        _traverse(self.root)
         return result
 
     def print_priority_list(self):
@@ -203,7 +203,44 @@ def sell_stock(symbol):
 # MAIN BOT LOGIC
 # ============================================================
 
-RUSSELL_2000 = ["AAPL", "MSFT", "NVDA", "AMZN", "META"]
+Stocks = [
+    # Mega-cap tech
+    "AAPL", "MSFT", "NVDA", "AMZN", "META", "TSLA", "GOOGL", "GOOG",
+
+    # Semiconductors / AI hardware
+    "AMD", "AVGO", "QCOM", "TSM", "INTC", "MU", "SMCI",
+
+    # High-volume popular tickers
+    "NFLX", "SHOP", "UBER", "DIS", "PYPL", "SBUX", "BABA", "NIO",
+
+    # Financials
+    "JPM", "BAC", "WFC", "GS", "MS", "C", "AXP", "BLK",
+
+    # Energy
+    "XOM", "CVX", "COP", "SLB", "EOG", "MPC",
+
+    # Industrials
+    "CAT", "DE", "GE", "LMT", "RTX", "BA", "NOC",
+
+    # Healthcare / Biotech
+    "JNJ", "PFE", "MRK", "LLY", "UNH", "BMY", "ABBV", "VRTX",
+
+    # Consumer
+    "KO", "PEP", "PG", "MCD", "COST", "WMT", "TGT", "HD", "LOW",
+
+    # EV Sector
+    "RIVN", "LCID", "F", "GM",
+
+    # AI / Cloud / SaaS
+    "CRM", "SNOW", "ADBE", "ORCL", "NET", "PATH", "PLTR",
+
+    # High-beta / volatile
+    "RIOT", "MARA", "SOFI", "UPST", "DKNG", "ROKU", "AFRM",
+
+    # ETFs (if you want broad volatility reads)
+    "SPY", "QQQ", "IWM", "VIXY"
+]
+
 
 bst = VolatilityBST()
 stock_info = {}   # your dictionary
@@ -211,7 +248,7 @@ stock_info = {}   # your dictionary
 print("Fetching indicators...")
 
 # Fetch indicators + store + build BST
-for stock in RUSSELL_2000:
+for stock in Stocks:
     ind = get_indicators(stock)
     if ind:
         print(f"{stock} → {ind}")
@@ -224,25 +261,30 @@ for stock in RUSSELL_2000:
 # =======================================================
 
 priority = bst.get_priority_list()
+bought = False
 
-if priority:
-    top_symbol, top_vol = priority[0]
-    ind = stock_info[top_symbol]
-
-    print(f"\nTop Priority Stock: {top_symbol} (Vol={top_vol:.4f})")
+for symbol, volatility in priority:
+    ind = stock_info[symbol]
+    
+    print(f"\nChecking {symbol} (Vol={volatility:.4f})")
     print("Indicators:", ind)
-
+    
     if (
-        ind["volatility"] > 35 and
-        ind["adx"] < 25 and
-        ind["rsi"] < 30
+        ind["volatility"] > 1.2 and
+        ind["adx"] > 30 and
+        ind["rsi"] > 50
     ):
-        if top_symbol not in positions:
-            buy_stock(top_symbol, ind["price"])
+        if symbol not in positions:
+            buy_stock(symbol, ind["price"])
+            bought = True
+            break  # Stop after buying one
         else:
-            print(f"{top_symbol} already owned — no new buy.")
-    else:
-        print("⚠ No buy — conditions not met.")
+            print(f"{symbol} already owned — checking next...")
+    
+if not bought:
+    print("⚠ No buy — no stocks met conditions.")
+
+
 
 
 # SELL LOGIC
